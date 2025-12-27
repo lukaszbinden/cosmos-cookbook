@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Iterable
 import json
 import time
+import random
 from datetime import datetime
 
 import tyro
@@ -868,6 +869,8 @@ def create_info_json_v21(
     mono: bool,
     *,
     chunk_size: int,
+    total_episode_count: int,
+    test_episode_count: int,
     data_extension: str = "parquet",
     video_extension: str = "mp4",
 ) -> Dict:
@@ -887,6 +890,10 @@ def create_info_json_v21(
             "pix_fmt": "yuv420p",
             "g": fps,
             "crf": 10
+        },
+        "splits": {
+            "train": f"{test_episode_count}:{total_episode_count}",
+            "test": f"0:{test_episode_count}"
         },
         "features": {}
     }
@@ -1063,6 +1070,35 @@ def convert_suturebot_to_lerobot_v21(
     if len(all_episodes) == 0:
         print("No episodes found. Check input path and dataset structure.")
         return
+
+    # shuffle episodes
+    random.seed(42)
+    random.shuffle(all_episodes)
+
+    # Get number of unique instructions
+    unique_instructions = set(episode[1] for episode in all_episodes)
+    print(f"Found {len(unique_instructions)} unique instructions")
+    
+    test_episode = {instruction: [] for instruction in unique_instructions}
+    total_episode_count = len(all_episodes)
+
+    # Create train and test episodes, with 3 test episodes per instruction
+    train_episodes = []
+    for episode in all_episodes:
+        instruction = episode[1]
+        if len(test_episode[instruction]) < 3:
+            test_episode[instruction].append(episode)
+        else:
+            train_episodes.append(episode)
+
+    # Flatten test_episode
+    test_episodes = [ep for episodes in test_episode.values() for ep in episodes]
+    test_episode_count = len(test_episodes)
+    print(f"Using {len(train_episodes)} train episodes")
+    print(f"Using {test_episode_count} test episodes")
+
+    # Re-merge episodes, we'll assign splits via info.json
+    all_episodes = test_episodes + train_episodes
     
     # Debug mode
     max_episodes = os.environ.get('MAX_EPISODES')
@@ -1083,6 +1119,8 @@ def convert_suturebot_to_lerobot_v21(
         image_size,
         mono,
         chunk_size=chunk_size,
+        total_episode_count=total_episode_count,
+        test_episode_count=test_episode_count,
         data_extension="parquet",
         video_extension="mp4",
     )

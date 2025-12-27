@@ -11,8 +11,6 @@ This guide provides instructions on running LoRA (Low-Rank Adaptation) post-trai
 
 ## Motivation
 
-TODO:  create train/test split with SutureBot data 
-
 While the base Cosmos Predict 2.5 model excels at general video generation, sports content demands specialized understanding of athletic dynamics and game rules. Post-training addresses critical gaps in **player kinematic realism and physics**, ensuring natural body movements and accurate ball trajectories. The adapted model achieves higher **rule-coherence scores** by respecting sport-specific constraints like offside lines, field boundaries, and valid player positions. Additionally, post-training significantly improves **identity consistency**, maintaining stable player appearances, jersey numbers, and team colors throughout generated sequences—essential for realistic sports simulation and analysis applications.
 
 ## Table of Contents
@@ -122,7 +120,6 @@ ls -1 *.zip | parallel 'echo "Unzipping {}"; unzip -q -o "{}"'
 Run the following script to convert the SutureBot dataset to LeRobot format:
 ```bash
 python3 -u convert_suturebot_to_lerobot.py --input-path /path/to/dataset/SutureBot --output-path /path/to/dataset/SutureBot-LeRobot
-TODO: create train / test split
 ```
 
 ### 1.3 Self Forcing Teacher Training
