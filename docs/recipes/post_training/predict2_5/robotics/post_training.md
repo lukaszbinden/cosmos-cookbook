@@ -143,8 +143,8 @@ ac_predict2p5_video2world_2b_suturebot_training['defaults'] = [
     {"override /model": "action_conditioned_video2world_fsdp_rectified_flow"},
     {"override /net": "cosmos_v1_2B_action_conditioned"},
     {"override /conditioner": "action_conditioned_video_conditioner"},
-    {"override /data_train": "suturebot_5frame_360_640_train"},
-    {"override /data_val": "suturebot_5frame_360_640_val"},
+    {"override /data_train": "suturebot_5frame_720_960_train"},
+    {"override /data_val": "suturebot_5frame_720_960_val"},
     "_self_",
 ]
 ac_predict2p5_video2world_2b_suturebot_training['model']['config']['net']['action_dim'] = 20
@@ -182,8 +182,8 @@ next:
     elif embodiment == "dvrk":
         # width = 512 if not downscaled_res else 256
         # height = 320 if not downscaled_res else 256
-        width = 640 if not downscaled_res else 256
-        height = 360 if not downscaled_res else 256
+        width = 960 if not downscaled_res else 256
+        height = 720 if not downscaled_res else 256
 
 ...
 
@@ -204,7 +204,7 @@ modality_configs, train_transform, test_transform = construct_modality_config_an
     num_frames=5, embodiment="dvrk", downscaled_res=False
 ) # TODO: not clear if 5 or 13 due to bug
 
-suturebot_5frame_360_640_train_dataset = L(LeRobotDataset)(
+suturebot_5frame_720_960_train_dataset = L(LeRobotDataset)(
     num_frames=5, # TODO: not clear if 5 or 13 due to bug
     time_division_factor=4,
     time_division_remainder=1,
@@ -220,7 +220,7 @@ suturebot_5frame_360_640_train_dataset = L(LeRobotDataset)(
     downscaled_res=False,
 )
 
-suturebot_5frame_360_640_val_dataset = L(LeRobotDataset)(
+suturebot_5frame_720_960_val_dataset = L(LeRobotDataset)(
     num_frames=5, # TODO: not clear if 5 or 13 due to bug
     time_division_factor=4,
     time_division_remainder=1,
@@ -238,33 +238,33 @@ suturebot_5frame_360_640_val_dataset = L(LeRobotDataset)(
 
 ...
 
-suturebot_5frame_360_640_train_dataloader = L(DataLoader)(
-    dataset=suturebot_5frame_360_640_train_dataset,
-    sampler=L(get_sampler)(dataset=suturebot_5frame_360_640_train_dataset),
+suturebot_5frame_720_960_train_dataloader = L(DataLoader)(
+    dataset=suturebot_5frame_720_960_train_dataset,
+    sampler=L(get_sampler)(dataset=suturebot_5frame_720_960_train_dataset),
     batch_size=1,
     drop_last=True,
 )
-suturebot_5frame_360_640_val_dataloader = L(DataLoader)(
-    dataset=suturebot_5frame_360_640_val_dataset,
-    sampler=L(get_sampler)(dataset=suturebot_5frame_360_640_val_dataset),
+suturebot_5frame_720_960_val_dataloader = L(DataLoader)(
+    dataset=suturebot_5frame_720_960_val_dataset,
+    sampler=L(get_sampler)(dataset=suturebot_5frame_720_960_val_dataset),
     batch_size=1,
     drop_last=True,
 )
 
 ...
 
-    # 5 frame 360 640
+    # 5 frame 720 960
     cs.store(
         group="data_train",
         package="dataloader_train",
-        name="suturebot_5frame_360_640_train",
-        node=suturebot_5frame_360_640_train_dataloader,
+        name="suturebot_5frame_720_960_train",
+        node=suturebot_5frame_720_960_train_dataloader,
     )
     cs.store(
         group="data_val",
         package="dataloader_val",
-        name="suturebot_5frame_360_640_val",
-        node=suturebot_5frame_360_640_val_dataloader,
+        name="suturebot_5frame_720_960_val",
+        node=suturebot_5frame_720_960_val_dataloader,
     )
 ```
 next:
@@ -307,14 +307,45 @@ next:
 ```
 
 
-Now start the teacher training, using 4 nodes (32 GPUs):
+Now start the teacher finetuning, using 4 nodes (32 GPUs):
 ```bash
 mkdir logs
 sbatch sf_teacher_training.sh
 ```
-Notabene: some checkpoint downloads occur checkpoints from nvidia/Cosmos-Experimental on HF.
+Notabene: some checkpoint downloads will occur from nvidia/Cosmos-Experimental on HF. TODO: no public access yet? Ask Jingyi.
+
+Run the finetuning for 20,000 steps.
+
+The teacher ckeckpoints will be saved in
+```bash
+cd ${IMAGINAIRE_OUTPUT_ROOT}/cosmos_predict2_action_conditioned/cosmos_predict_v2p5/ac_predict2p5_video2world_2b_suturebot_training/checkpoints
+```
+
+Convert the distributed checkpoint to compact format as follows:
+```bash
+CHECKPOINTS_DIR=${IMAGINAIRE_OUTPUT_ROOT}/cosmos_predict2_action_conditioned/cosmos_predict_v2p5/ac_predict2p5_video2world_2b_suturebot_training/checkpoints
+CHECKPOINT_ITER=iter_000020000
+CHECKPOINT_DIR=$CHECKPOINTS_DIR/$CHECKPOINT_ITER
+python ./scripts/convert_distcp_to_pt.py $CHECKPOINT_DIR/model $CHECKPOINT_DIR
+```
 
 ### 1.4 Generate Self-Forcing Teacher Trajectory Cache
+Using one GPU, generate the teacher trajectory cache. In the following command, specify the teacher checkpoint from the previous finetuning run.
+The teacher trajectory cache will be written to the directory `trajectory_cache/warmup_regenerated_4step`. 
+```bash
+mkdir trajectory_cache
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. python cosmos_predict2/_src/predict2/action/inference/inference_gr00t_warmup.py \
+    --experiment=ac_predict2p5_video2world_2b_jhu_training   \
+    --ckpt_path ${IMAGINAIRE_OUTPUT_ROOT}/cosmos_predict2_action_conditioned/cosmos_predict_v2p5/ac_predict2p5_video2world_2b_suturebot_training/checkpoints/iter_000020000/model_ema_bf16.pt \
+    --input_video_root /path/to/dataset/SutureBot-LeRobot \
+    --save_root trajectory_cache/warmup_regenerated_4step \
+    --resolution 720,960 \
+    --guidance 0 \
+    --chunk_size 12 \
+    --start 0 \
+    --end 1000 \
+    --query_steps 0,9,18,27,34
+```
 
 
 ### 1.5 Launch Self-Forcing Warmup Training
