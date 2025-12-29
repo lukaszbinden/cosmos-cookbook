@@ -7,17 +7,21 @@
 |-----------|--------------|-------------------|
 | [Cosmos Predict 2.5](https://github.com/nvidia-cosmos/cosmos-predict2.5) | Post-training | Surgical Robotics |
 
-This guide provides instructions on running post-training with the action conditioned Cosmos Predict 2.5 model for surgical robotics control and soft tissue simulation.
+This guide provides instructions on running LoRA (Low-Rank Adaptation) post-training with the Cosmos Predict 2.5 models for sports video generation tasks, supporting Text2World, Image2World, and Video2World generation modes.
 
 ## Motivation
-
-TODO While the base Cosmos Predict 2.5 model excels at general video generation, sports content demands specialized understanding of athletic dynamics and game rules. Post-training addresses critical gaps in **player kinematic realism and physics**, ensuring natural body movements and accurate ball trajectories. The adapted model achieves higher **rule-coherence scores** by respecting sport-specific constraints like offside lines, field boundaries, and valid player positions. Additionally, post-training significantly improves **identity consistency**, maintaining stable player appearances, jersey numbers, and team colors throughout generated sequences—essential for realistic sports simulation and analysis applications.
+While the base Cosmos Predict 2.5 model excels at general video generation, sports content demands specialized understanding of athletic dynamics and game rules. Post-training addresses critical gaps in **player kinematic realism and physics**, ensuring natural body movements and accurate ball trajectories. The adapted model achieves higher **rule-coherence scores** by respecting sport-specific constraints like offside lines, field boundaries, and valid player positions. Additionally, post-training significantly improves **identity consistency**, maintaining stable player appearances, jersey numbers, and team colors throughout generated sequences—essential for realistic sports simulation and analysis applications.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
 - [Preparing Data](#1-preparing-data)
-TODO COMPLETE TOC
+- [LoRA Post-training](#2-lora-post-training)
+  - [Configuration](#21-configuration)
+  - [Training](#22-training)
+- [Inference with LoRA Post-trained checkpoint](#3-inference-with-lora-post-trained-checkpoint)
+  - [Converting DCP Checkpoint to Consolidated PyTorch Format](#31-converting-dcp-checkpoint-to-consolidated-pytorch-format)
+  - [Running Inference](#32-running-inference)
 
 ## Prerequisites
 
@@ -118,9 +122,7 @@ python3 -u convert_suturebot_to_lerobot.py --input-path /path/to/dataset/SutureB
 ```
 The script creates a training and a test split.
 
-### 1.3 Cosmos-predict 2.5 finetuning
-The finetuning wil be performed at 720x960 resolution with 12 frames prediction horizon.
-
+### 1.3 Self Forcing Teacher Training
 Before executing the training script, the following source code changes must be implemented:
 
 ```python
@@ -132,100 +134,24 @@ next:
 # file: cosmos_predict2/experiments/base/action.py
 import copy
 ac_predict2p5_video2world_2b_suturebot_training = copy.deepcopy(ac_reason_embeddings_rectified_flow_2b_256_320)
-ac_predict2p5_video2world_2b_suturebot_training['job']['name'] = 'def_ac_predict2p5_video2world_2b_suturebot_training'
+ac_predict2p5_video2world_2b_suturebot_training['job']['name'] = 'ac_predict2p5_video2world_2b_suturebot_training'
 ac_predict2p5_video2world_2b_suturebot_training['defaults'] = [
     DEFAULT_CHECKPOINT.experiment,
     {"override /model": "action_conditioned_video2world_fsdp_rectified_flow"},
     {"override /net": "cosmos_v1_2B_action_conditioned"},
     {"override /conditioner": "action_conditioned_video_conditioner"},
-    {"override /data_train": "suturebot_train"},
-    {"override /data_val": "suturebot_val"},
+    {"override /data_train": "suturebot_5frame_720_960_train"},
+    {"override /data_val": "suturebot_5frame_720_960_val"},
     "_self_",
 ]
 ac_predict2p5_video2world_2b_suturebot_training['model']['config']['net']['action_dim'] = 20
+ac_predict2p5_video2world_2b_suturebot_training['model']['config']['net']['num_action_per_chunk'] = 4
 ac_predict2p5_video2world_2b_suturebot_training['dataloader_train'] = {'batch_size': 4}
 ac_predict2p5_video2world_2b_suturebot_training['optimizer']['lr'] = 7.5e-6 # assuming 4 nodes
 
 cs = ConfigStore.instance()
 
 for _item in [ac_reason_embeddings_rectified_flow_2b_256_320, ac_predict2p5_video2world_2b_suturebot_training]:
-```
-next:
-```python
-# file: cosmos_predict2/_src/predict2/action/configs/action_conditioned/data.py
-
-# experiment for action-sequence video prediction
-base_path_suturebot_ds = "/SutureBot"
-# Construct modality configs and transforms
-from cosmos_predict2._src.predict2.action.datasets.gr00t_dreams.data.dataset import LeRobotDataset
-from cosmos_predict2._src.predict2.action.datasets.gr00t_dreams.groot_configs import (
-    construct_modality_config_and_transforms,
-)
-modality_configs, train_transform, test_transform = construct_modality_config_and_transforms(
-    num_frames=13, embodiment="dvrk", downscaled_res=False
-)
-
-suturebot_train_dataset = L(LeRobotDataset)(
-    num_frames=13,
-    time_division_factor=4,
-    time_division_remainder=1,
-    max_pixels=1920 * 1080,
-    data_file_keys=("video",),
-    image_file_extension=("jpg", "jpeg", "png", "webp"),
-    video_file_extension=("mp4", "avi", "mov", "wmv", "mkv", "flv", "webm"),
-    repeat=1,
-    args=None,
-    dataset_path=base_path_suturebot_ds,
-    data_split="train",
-    embodiment="dvrk",
-    downscaled_res=False,
-)
-
-suturebot_val_dataset = L(LeRobotDataset)(
-    num_frames=13,
-    time_division_factor=4,
-    time_division_remainder=1,
-    max_pixels=1920 * 1080,
-    data_file_keys=("video",),
-    image_file_extension=("jpg", "jpeg", "png", "webp"),
-    video_file_extension=("mp4", "avi", "mov", "wmv", "mkv", "flv", "webm"),
-    repeat=1,
-    args=None,
-    dataset_path=base_path_suturebot_ds,
-    data_split="test",
-    embodiment="dvrk",
-    downscaled_res=False,
-)
-
-...
-
-suturebot_train_dataloader = L(DataLoader)(
-    dataset=suturebot_train_dataset,
-    sampler=L(get_sampler)(dataset=suturebot_train_dataset),
-    batch_size=1,
-    drop_last=True,
-)
-suturebot_val_dataloader = L(DataLoader)(
-    dataset=suturebot_val_dataset,
-    sampler=L(get_sampler)(dataset=suturebot_val_dataset),
-    batch_size=1,
-    drop_last=True,
-)
-
-...
-
-    cs.store(
-        group="data_train",
-        package="dataloader_train",
-        name="suturebot_train",
-        node=suturebot_train_dataloader,
-    )
-    cs.store(
-        group="data_val",
-        package="dataloader_val",
-        name="suturebot_val",
-        node=suturebot_val_dataloader,
-    )
 ```
 next:
 ```python
@@ -258,8 +184,85 @@ next:
 
 ...
 
-# further, replace "min_max" by "mean_std" (w.r.t. normalization_modes, 4x times):
-    normalization_modes={key: "mean_std" for key in action_modality.modality_keys},
+# further, replace "min_max" by "mean_std" (w.r.t. normalization_modes, 4x times)
+```
+next:
+```python
+# file: cosmos_predict2/_src/predict2/action/configs/action_conditioned/data.py
+
+# experiment for action-sequence video prediction
+base_path_suturebot_ds = "/SutureBot"
+# Construct modality configs and transforms
+from cosmos_predict2._src.predict2.action.datasets.gr00t_dreams.data.dataset import LeRobotDataset
+from cosmos_predict2._src.predict2.action.datasets.gr00t_dreams.groot_configs import (
+    construct_modality_config_and_transforms,
+)
+modality_configs, train_transform, test_transform = construct_modality_config_and_transforms(
+    num_frames=5, embodiment="dvrk", downscaled_res=False
+) # TODO: not clear if 5 or 13 due to bug
+
+suturebot_5frame_720_960_train_dataset = L(LeRobotDataset)(
+    num_frames=5, # TODO: not clear if 5 or 13 due to bug
+    time_division_factor=4,
+    time_division_remainder=1,
+    max_pixels=1920 * 1080,
+    data_file_keys=("video",),
+    image_file_extension=("jpg", "jpeg", "png", "webp"),
+    video_file_extension=("mp4", "avi", "mov", "wmv", "mkv", "flv", "webm"),
+    repeat=1,
+    args=None,
+    dataset_path=base_path_suturebot_ds,
+    data_split="train",
+    embodiment="dvrk",
+    downscaled_res=False,
+)
+
+suturebot_5frame_720_960_val_dataset = L(LeRobotDataset)(
+    num_frames=5, # TODO: not clear if 5 or 13 due to bug
+    time_division_factor=4,
+    time_division_remainder=1,
+    max_pixels=1920 * 1080,
+    data_file_keys=("video",),
+    image_file_extension=("jpg", "jpeg", "png", "webp"),
+    video_file_extension=("mp4", "avi", "mov", "wmv", "mkv", "flv", "webm"),
+    repeat=1,
+    args=None,
+    dataset_path=base_path_suturebot_ds,
+    data_split="test",
+    embodiment="dvrk",
+    downscaled_res=False,
+)
+
+...
+
+suturebot_5frame_720_960_train_dataloader = L(DataLoader)(
+    dataset=suturebot_5frame_720_960_train_dataset,
+    sampler=L(get_sampler)(dataset=suturebot_5frame_720_960_train_dataset),
+    batch_size=1,
+    drop_last=True,
+)
+suturebot_5frame_720_960_val_dataloader = L(DataLoader)(
+    dataset=suturebot_5frame_720_960_val_dataset,
+    sampler=L(get_sampler)(dataset=suturebot_5frame_720_960_val_dataset),
+    batch_size=1,
+    drop_last=True,
+)
+
+...
+
+    # 5 frame 720 960
+    cs.store(
+        group="data_train",
+        package="dataloader_train",
+        name="suturebot_5frame_720_960_train",
+        node=suturebot_5frame_720_960_train_dataloader,
+    )
+    cs.store(
+        group="data_val",
+        package="dataloader_val",
+        name="suturebot_5frame_720_960_val",
+        node=suturebot_5frame_720_960_val_dataloader,
+    )
 ```
 next:
 ```python
@@ -301,21 +304,19 @@ next:
 ```
 
 
-Now start the finetuning, using 4 nodes (32 GPUs):
+Now start the teacher finetuning, using 4 nodes (32 GPUs):
 ```bash
 mkdir logs
-sbatch run_finetuning.sh
+sbatch sf_teacher_training.sh
 ```
 Notabene: some checkpoint downloads will occur from nvidia/Cosmos-Experimental on HF. TODO: no public access yet? Ask Jingyi.
 
 Run the finetuning for 20,000 steps.
 
-The ckeckpoints will be saved in
+The teacher ckeckpoints will be saved in
 ```bash
-cd ${IMAGINAIRE_OUTPUT_ROOT}/cosmos_predict2_action_conditioned/cosmos_predict_v2p5/def_ac_predict2p5_video2world_2b_suturebot_training/checkpoints
+cd ${IMAGINAIRE_OUTPUT_ROOT}/cosmos_predict2_action_conditioned/cosmos_predict_v2p5/ac_predict2p5_video2world_2b_suturebot_training/checkpoints
 ```
-
-TODO AT WORK 29/12 ****************************************
 
 Convert the distributed checkpoint to compact format as follows:
 ```bash
@@ -343,6 +344,7 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. python cosmos_predict2/_src/predict2/action/
     --query_steps 0,9,18,27,34
 ```
 
+TODO at work 28/12
 
 ### 1.5 Launch Self-Forcing Warmup Training
 
