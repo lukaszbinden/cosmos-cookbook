@@ -38,9 +38,6 @@ Usage:
 ------
     python dvrk_zarr_to_lerobot_v2.py --data-path /path/to/dataset --repo-id username/dataset-name
 
-To also push to the Hugging Face Hub:
-    python /lustre/fsw/portfolios/healthcareeng/users/nigeln/20_cosmos_cookbook/docs/recipes/post_training/predict2_5/robotics/scripts/convert_suturebot_to_lerobot_v2.py --data-path /lustre/fsw/portfolios/healthcareeng/users/nigeln/scratch/SutureBot --repo-id jhu_lerobot/suturebot_lerobot
-
 Dependencies:
 -------------
 - lerobot v0.3.3
@@ -129,7 +126,7 @@ ACTION_NAMES_6D = [
 def quat_to_6d_rotation(quat: np.ndarray) -> np.ndarray:
     """
     Convert quaternion [qx, qy, qz, qw] to 6D rotation representation.
-    Returns first two columns of rotation matrix flattened.
+    Returns first two rows of rotation matrix flattened (row-major order).
     """
     qx, qy, qz, qw = quat
     n = qx * qx + qy * qy + qz * qz + qw * qw
@@ -412,7 +409,4 @@ def main(
 
 
 if __name__ == "__main__":
-    start_time = time.time()
     tyro.cli(main)
-    print(f"Time taken: {time.time() - start_time}")
-
