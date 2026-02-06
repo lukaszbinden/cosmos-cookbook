@@ -30,18 +30,22 @@ TODO RECIPE FEEDBACK:
 
 ## 1. Prerequisites
 
-### 1.1. Environment Setup
+Complete the steps below in order: clone the repo (1.1), run the Setup guide (1.2), then configure Hugging Face and paths (1.3–1.5).
 
-Clone the following cosmos-predict2.5-cookbook repository, which is a fork of the official [cosmos-predict2.5](https://github.com/nvidia-cosmos/cosmos-predict2.5) repo that has all the code changes of this recipe already applied:
+### 1.1. Clone the repository
+
+Clone the cosmos-predict2.5-cookbook repository (a fork of [cosmos-predict2.5](https://github.com/nvidia-cosmos/cosmos-predict2.5) with this recipe’s code changes applied):
 
 ```bash
 git clone https://github.com/lukaszbinden/cosmos-predict2.5-cookbook.git
 cd cosmos-predict2.5-cookbook
 ```
 
-Then, follow the [Setup guide](./setup.md) for general environment setup instructions, including installing dependencies.
+### 1.2. Run the Setup guide
 
-### 1.2. Hugging Face Configuration
+Follow the [Setup guide](./setup.md): install system dependencies, uv, Python env (`uv sync --extra=cu128`), and HF CLI. **Finish all steps in the Setup guide before continuing below.**
+
+### 1.3. Hugging Face Configuration
 
 Model checkpoints are automatically downloaded during post-training if they are not present. Configure Hugging Face as follows:
 
@@ -56,7 +60,7 @@ export HF_HOME=/path/to/your/hf/cache
 
 > **💡 Tip**: Ensure you have sufficient disk space in `HF_HOME`.
 
-### 1.3. Training Output Directory
+### 1.4. Training Output Directory
 
 Configure where training checkpoints and artifacts will be saved:
 
@@ -68,7 +72,7 @@ export IMAGINAIRE_OUTPUT_ROOT=/path/to/your/output/directory
 
 > **💡 Tip**: By default, `IMAGINAIRE_OUTPUT_ROOT` is `/tmp/imaginaire4-output`. We strongly recommend setting `IMAGINAIRE_OUTPUT_ROOT` to a location with sufficient storage space for your checkpoints.
 
-### 1.4. Weights & Biases (W&B) Logging
+### 1.5. Weights & Biases (W&B) Logging
 
 By default, training will attempt to log metrics to Weights & Biases. You have several options:
 
@@ -120,28 +124,19 @@ Replace this path with the actual download location of the SutureBot dataset. Th
 video clips stored as individual JPG files at 640x480 resolution.
 
 ### 2.3 Download
-In your environment (conda, docker, etc.), install the HuggingFace library:
-```python
-python -m pip install --upgrade huggingface_hub
-```
-then download the dataset as follows:
-```python
-python - << 'EOF'
-from huggingface_hub import snapshot_download
+Ensure `huggingface_hub` is installed (e.g. `pip install huggingface_hub`, or from the [Setup](./setup.md) env).
 
-snapshot_download(
-    repo_id="jchen396/SutureBot",
-    repo_type="dataset",
-    local_dir="/path/to/dataset/SutureBot",
-    local_dir_use_symlinks=False,
-)
-EOF
+Set the dataset destination and run the download script:
+```bash
+export SUTUREBOT_DATASET_DIR=/path/to/dataset/SutureBot
+./scripts/download_suturebot.sh
 ```
+The script reads `SUTUREBOT_DATASET_DIR` and downloads the dataset there.
 
 Unpack zip files:
 
 ```bash
-cd /path/to/dataset/SutureBot
+cd $SUTUREBOT_DATASET_DIR
 ls -1 *.zip | parallel 'echo "Unzipping {}"; unzip -q -o "{}"'
 ```
 
@@ -151,22 +146,27 @@ To be compatible with Cosmos data processing, we need to convert the raw SutureB
 Run the following script to convert the [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) dataset to the LeRobot format (notice lerobot==0.3.3 is expected). Notice that the output path is retrieved from the env variable \$HF_LEROBOT_HOME. Override \$HF_LEROBOT_HOME to change the location of the output.  
 ```bash
 # optional: export HF_LEROBOT_HOME=/path/to/dataset/SutureBot/LeRobot
-python3 -u convert_suturebot_to_lerobot_v3.py --data-path /path/to/dataset/SutureBot 
+python3 -u convert_suturebot_to_lerobot_v3.py --data-path $SUTUREBOT_DATASET_DIR
 ```
-The script will save the SutureBot dataset in LeRobot format at the location as specified by $HF_LEROBOT_HOME.
+The script will save the SutureBot dataset in LeRobot format at the location as specified by $HF_LEROBOT_HOME. Conversion typically takes **about 1.5–2.5 hours** (~1,891 episodes; video encoding is the bottleneck).
 
 ## 3. Model Configuration
-The finetuning wil be performed at 720x960 resolution (to match 720p pre-training) with 12 frames prediction horizon.
 
-Note: thanks to the cloned repository from step 1.1 which has all code changes integrated already, you can skip this section which is left for informational purposes only. 
+The finetuning is performed at 720×960 resolution (to match 720p pre-training) with a 12-frame prediction horizon.
 
-~~Before executing the finetuning script, the following source code changes must be applied to the cloned repository (as described in [Setup guide](./setup.md)). Those changes will address both model configuration and [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) data processing:~~
+**Do you need to apply anything?**
 
-TODO RECIPE FEEDBACK:
-- make presentation of code changes more intuitive, i.e. for tutorial purposes only thanks to fork
+- **If you cloned the [cosmos-predict2.5-cookbook](https://github.com/lukaszbinden/cosmos-predict2.5-cookbook) fork in step 1.1:** these code changes are already in that repo. **Skip this section and go to [§4 Finetuning](#4-finetuning).**
+- **If you are using the upstream [cosmos-predict2.5](https://github.com/nvidia-cosmos/cosmos-predict2.5) repo instead:** you must apply the diffs below. From the repo root, save each block as a `.patch` file and run `patch -p1 < file.patch`, or edit the listed files by hand to match the diffs.
+
+The subsections below document the changes for reference only.
 
 ### 3.1 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/embodiment_tags.py
 Rationale: Register the embodiment 'dvrk'.
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/embodiment_tags.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/embodiment_tags.py
 index e31586f..9133347 100644
@@ -179,8 +179,14 @@ index e31586f..9133347 100644
 +    DVRK = "dvrk"
 ```
 
+</details>
+
 ### 3.2 cosmos_predict2/_src/predict2/action/configs/action_conditioned/experiment/exp_2B_action_conditioned_rectify_flow_gr00t.py
 Rationale: Configure the 2B Cosmos-predict 2.5 model for the [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) dataset.
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/configs/action_conditioned/experiment/exp_2B_action_conditioned_rectify_flow_gr00t.py b/cosmos_predict2/_src/predict2/action/configs/action_conditioned/experiment/exp_2B_action_conditioned_rectify_flow_gr00t.py
 index 108267f..f59f22d 100644
@@ -239,8 +245,14 @@ index 108267f..f59f22d 100644
      if _item_wo_resume is not None:
 ```
 
+</details>
+
 ### 3.3 cosmos_predict2/_src/predict2/action/configs/action_conditioned/data.py
 Rationale: Define the data loading for the [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) dataset.
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/configs/action_conditioned/data.py b/cosmos_predict2/_src/predict2/action/configs/action_conditioned/data.py
 index 6b45363..f7316ed 100644
@@ -337,8 +349,14 @@ index 6b45363..f7316ed 100644
          register_gr00t_customized_gr1_data()
 ```
 
+</details>
+
 ### 3.4 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/groot_configs.py
 Rationale: Add more configuration required for the [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) dataset (e.g., resolution, delta action computation, normalization).
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/groot_configs.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/groot_configs.py
 index 9932214..6f14d54 100644
@@ -422,8 +440,14 @@ index 9932214..6f14d54 100644
                  video_concat_order=video_modality.modality_keys,
 ```
 
+</details>
+
 ### 3.5 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/video.py
 Rationale: A small bugfix on the Cosmos OSS code.
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/video.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/video.py
 index 5eb4a32..5b022a8 100644
@@ -440,8 +464,14 @@ index 5eb4a32..5b022a8 100644
              if sub_key in dataset_metadata.modalities.video:
 ```
 
+</details>
+
 ### 3.6 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/concat.py
 Rationale: A small bugfix on the Cosmos OSS code.
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/concat.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/concat.py
 index 9f9b537..9804503 100644
@@ -467,8 +497,14 @@ index 9f9b537..9804503 100644
          assert subkey in modality_config, f"{subkey=} not found in {modality_config=}"
 ```
 
+</details>
+
 ### 3.7 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/state_action.py
-Rationale: Functions to compute the kinematic delta action representation following [Stanford's UMI implementation](https://github.com/real-stanford/universal_manipulation_interface). 
+Rationale: Functions to compute the kinematic delta action representation following [Stanford's UMI implementation](https://github.com/real-stanford/universal_manipulation_interface).
+
+<details>
+<summary>Show patch</summary>
+
 ```python
  diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/state_action.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/transform/state_action.py
 index 06c82d9..6572892 100644
@@ -680,8 +716,14 @@ index 06c82d9..6572892 100644
      Class for state or action perturbation.
 ```
 
+</details>
+
 ### 3.8 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/utils/video.py
 Rationale: A bugfix on the Cosmos OSS code (occurs in case dataset videos in mp4 format use AV1 codec).
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/utils/video.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/utils/video.py
 index 58a777f..9996f36 100644
@@ -715,14 +757,19 @@ index 58a777f..9996f36 100644
 +        # Find closest loaded frame for each requested timestamp
 +        indices = np.abs(loaded_ts - requested_ts).argmin(axis=0)
 +        frames = np.array([loaded_frames[i] for i in indices])
-         return frames.transpose(0, 2, 3, 1)
-     else:
-         raise NotImplementedError
+        return frames.transpose(0, 2, 3, 1)
+    else:
+        raise NotImplementedError
 ```
 
+</details>
 
 ### 3.9 cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/dataset.py
 Rationale: Minor code changes to facilitate kinematic delta action representation following [Stanford's UMI implementation](https://github.com/real-stanford/universal_manipulation_interface).
+
+<details>
+<summary>Show patch</summary>
+
 ```python
 diff --git a/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/dataset.py b/cosmos_predict2/_src/predict2/action/datasets/gr00t_dreams/data/dataset.py
 index 0aed5bb..7d0c1f0 100644
@@ -784,15 +831,32 @@ index 0aed5bb..7d0c1f0 100644
 +
 ```
 
+</details>
+
 ## 4. Finetuning
 With the code changes applied, we are set to start the finetuning, using 4 nodes (32 GPUs). 
 The batch size was configured to be 4, resulting in a global batch size of 128. 
 We recommend using at least 1 node with 8 GPUs for finetuning the 2B Cosmos model (global batch size of 32).
 
-Adapt the reference script 'run_finetuning.sh' to your environment.
+### Option A: Single server (no Slurm)
+
+On a single machine without a job scheduler, use the standalone script. From your **cosmos-predict2.5-cookbook** clone:
+
 ```bash
-mkdir logs
-sbatch run_finetuning.sh
+export SUTUREBOT_LEROBOT_PATH=/path/to/suturebot_lerobot   # LeRobot dataset from §2.4
+# Optional: NGPUS=8 COSMOS_WORKSPACE=/path/to/cosmos-predict2.5-cookbook
+./scripts/run_finetuning_standalone.sh
+```
+
+If the training config expects the dataset at `/SutureBot`, create a symlink: `sudo ln -snf "$SUTUREBOT_LEROBOT_PATH" /SutureBot`. Copy `scripts/run_finetuning_standalone.sh` from this recipe into your clone if needed.
+
+### Option B: Slurm (multi-node)
+
+Adapt the reference script `scripts/run_finetuning.sh` to your environment (paths, partition, account, container image). The script is a **Slurm batch job**—you must submit it with `sbatch`; do not run it directly. If your cluster does not have Slurm set up, see [Slurm setup](setup_slurm.md).
+
+```bash
+mkdir -p logs
+sbatch scripts/run_finetuning.sh
 ```
 
 Run the finetuning for 20,000 steps.

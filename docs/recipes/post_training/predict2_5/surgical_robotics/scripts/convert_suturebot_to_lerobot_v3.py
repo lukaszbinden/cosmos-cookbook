@@ -67,8 +67,19 @@ import torch
 from PIL import Image
 import time
 from scipy.spatial.transform import Rotation
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.constants import HF_LEROBOT_HOME
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.constants import HF_LEROBOT_HOME
+except ModuleNotFoundError as e:
+    try:
+        import lerobot
+        ver = getattr(lerobot, "__version__", "unknown")
+    except Exception:
+        ver = "not installed"
+    raise SystemExit(
+        f"This script requires lerobot==0.3.3 (package layout changed in 0.4.x). "
+        f"You have lerobot {ver}. Install with: pip install lerobot==0.3.3"
+    ) from e
 
 states_name = [
     "psm1_pose.position.x",

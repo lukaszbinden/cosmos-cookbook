@@ -8,6 +8,16 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.optional-dependencies]
+cu128 = [
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+]
+cu129 = [
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+]
+
 [dependency-groups]
 dev = [
     "ipykernel>=6.30.1",
@@ -24,9 +34,44 @@ scripts = [
     "numpy",
     "streamlit",
 ]
+# Surgical robotics / SutureBot: download script + convert_suturebot_to_lerobot_v3.py.
+# lerobot==0.3.3 is required for the convert script but pins torchvision<0.23; install it
+# separately in your env (e.g. pip install lerobot==0.3.3) if needed.
+suturebot = [
+    "huggingface_hub",
+    "pandas",
+    "pillow",
+    "scipy",
+    "torchcodec",
+    "tqdm",
+    "tyro",
+]
 
 [tool.uv]
 default-groups = ["dev", "docs", "scripts"]
+conflicts = [
+    [{ extra = "cu128" }, { extra = "cu129" }],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", extra = "cu128" },
+    { index = "pytorch-cu129", extra = "cu129" },
+]
+torchvision = [
+    { index = "pytorch-cu128", extra = "cu128" },
+    { index = "pytorch-cu129", extra = "cu129" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
 
 [tool.uv.build-backend]
 module-name = ["scripts"]

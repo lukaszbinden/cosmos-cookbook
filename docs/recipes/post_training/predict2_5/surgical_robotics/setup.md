@@ -1,5 +1,7 @@
 # Setup Guide
 
+Run this setup **after** you clone the repository in [Post-training §1.1](post_training.md#11-clone-the-repository). Complete all steps below before continuing with the rest of the post-training tutorial.
+
 ## System Requirements
 
 * NVIDIA GPUs with Ampere architecture (RTX 30 Series, A100) or newer
@@ -50,6 +52,10 @@ CUDA variants:
 
 Checkpoints are automatically downloaded during inference and post-training. To modify the checkpoint cache location, set the [`HF_HOME`](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables#hfhome) environment variable.
 
+## Optional: Slurm
+
+To run finetuning with **Slurm** (`sbatch scripts/run_finetuning.sh`) on your own cluster, see [Slurm setup](setup_slurm.md). If you have a single server without Slurm, use [run_finetuning_standalone.sh](scripts/run_finetuning_standalone.sh) instead (see [Post-training §4](post_training.md#4-finetuning)).
+
 ## Next Steps
 
-Once the setup is complete, proceed to the [post-training tutorial](post_training.md) to learn how to use Cosmos Predict 2 for action-controlled surgical robotics.
+Once this setup is complete, return to the [post-training tutorial](post_training.md) and continue from **§1.3 Hugging Face Configuration** onward.
