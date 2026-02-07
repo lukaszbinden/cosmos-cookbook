@@ -45,6 +45,24 @@ cd cosmos-predict2.5-cookbook
 
 Follow the [Setup guide](./setup.md): install system dependencies, uv, Python env (`uv sync --extra=cu128`), and HF CLI. **Finish all steps in the Setup guide before continuing below.**
 
+### 1.2.1 Build the Docker image (for containerized runs)
+
+If you will run finetuning via the **standalone script with Docker** (§4 Option A) or use a container on your cluster, you must build the Docker image from the **cosmos-predict2.5-cookbook** repo (the same fork you cloned in §1.1). The image provides the correct CUDA, PyTorch, and project dependencies.
+
+From the root of your cosmos-predict2.5-cookbook clone (e.g. `/ephemeral/cosmos-predict2.5-cookbook`):
+
+```bash
+cd /path/to/cosmos-predict2.5-cookbook   # e.g. /ephemeral/cosmos-predict2.5-cookbook
+# Ampere – Hopper (CUDA 12.8); omit -q to see build progress in the foreground
+docker build -f Dockerfile -t cosmos-predict2.5:local .
+export COSMOS_CONTAINER_IMAGE=cosmos-predict2.5:local
+# Or for Blackwell (nightly):
+# docker build -f docker/nightly.Dockerfile -t cosmos-predict2.5:local .
+# export COSMOS_CONTAINER_IMAGE=cosmos-predict2.5:local
+```
+
+Use the same image tag when setting `COSMOS_CONTAINER_IMAGE` for `run_finetuning_standalone.sh` or when configuring your Slurm container image.
+
 ### 1.3. Hugging Face Configuration
 
 Model checkpoints are automatically downloaded during post-training if they are not present. Configure Hugging Face as follows:
@@ -124,10 +142,11 @@ Replace this path with the actual download location of the SutureBot dataset. Th
 video clips stored as individual JPG files at 640x480 resolution.
 
 ### 2.3 Download
-Ensure `huggingface_hub` is installed (e.g. `pip install huggingface_hub`, or from the [Setup](./setup.md) env).
+Run these steps from your **cosmos-cookbook** clone (this recipe's repo). Ensure `huggingface_hub` is installed (e.g. `pip install huggingface_hub`, or from the [Setup](./setup.md) env).
 
 Set the dataset destination and run the download script:
 ```bash
+cd docs/recipes/post_training/predict2_5/surgical_robotics
 export SUTUREBOT_DATASET_DIR=/path/to/dataset/SutureBot
 ./scripts/download_suturebot.sh
 ```
@@ -141,14 +160,29 @@ ls -1 *.zip | parallel 'echo "Unzipping {}"; unzip -q -o "{}"'
 ```
 
 ### 2.4 Convert to LeRobot Dataset format
-To be compatible with Cosmos data processing, we need to convert the raw SutureBot data to the LeRobot Dataset format. 
+To be compatible with Cosmos data processing, we need to convert the raw SutureBot data to the LeRobot Dataset format. Run from your **cosmos-cookbook** clone (same directory as in §2.3).
 
-Run the following script to convert the [SutureBot](https://huggingface.co/datasets/jchen396/SutureBot) dataset to the LeRobot format (notice lerobot==0.3.3 is expected). Notice that the output path is retrieved from the env variable \$HF_LEROBOT_HOME. Override \$HF_LEROBOT_HOME to change the location of the output.  
+Because full conversion takes **about 1.5–2.5 hours** (~1,891 episodes; video encoding is the bottleneck), you can create a **mini dataset** with a few episodes for quick runs:
+
+```bash
+cd docs/recipes/post_training/predict2_5/surgical_robotics
+# optional: export HF_LEROBOT_HOME=/path/to/output/LeRobot
+python3 -u scripts/create_mini_suturebot.py \
+  --source /path/to/dataset \
+  --output /path/to/dataset/SutureBot_mini \
+  --max-episodes 3 \
+  --tissue tissue_1
+```
+
+This copies a subset of episodes from the source (e.g. a few per subtask from `tissue_1`) into `--output`, then runs `convert_suturebot_to_lerobot_v3.py` on that folder. Add `--no-convert` to only create the mini folder. LeRobot output goes under $HF_LEROBOT_HOME (e.g. `suturebot_lerobot_mini`).
+
+**Full dataset conversion:** run the converter directly on the full dataset (lerobot==0.3.3 is expected; output path is controlled by \$HF_LEROBOT_HOME):
+
 ```bash
 # optional: export HF_LEROBOT_HOME=/path/to/dataset/SutureBot/LeRobot
-python3 -u convert_suturebot_to_lerobot_v3.py --data-path $SUTUREBOT_DATASET_DIR
+python3 -u scripts/convert_suturebot_to_lerobot_v3.py --data-path $SUTUREBOT_DATASET_DIR
 ```
-The script will save the SutureBot dataset in LeRobot format at the location as specified by $HF_LEROBOT_HOME. Conversion typically takes **about 1.5–2.5 hours** (~1,891 episodes; video encoding is the bottleneck).
+The script writes the SutureBot dataset in LeRobot format under $HF_LEROBOT_HOME.
 
 ## 3. Model Configuration
 
@@ -840,15 +874,107 @@ We recommend using at least 1 node with 8 GPUs for finetuning the 2B Cosmos mode
 
 ### Option A: Single server (no Slurm)
 
-On a single machine without a job scheduler, use the standalone script. From your **cosmos-predict2.5-cookbook** clone:
+On a single machine without a job scheduler, use the standalone script. It uses the **cosmos-predict2.5-cookbook** repo as the code path (and optionally runs inside the Docker image built in §1.2.1). Copy `scripts/run_finetuning_standalone.sh` from this recipe into your **cosmos-cookbook** clone (or run it from the recipe’s `scripts/` directory).
+
+**Using Docker (recommended):** build the image from cosmos-predict2.5-cookbook first (§1.2.1), then:
 
 ```bash
-export SUTUREBOT_LEROBOT_PATH=/path/to/suturebot_lerobot   # LeRobot dataset from §2.4
-# Optional: NGPUS=8 COSMOS_WORKSPACE=/path/to/cosmos-predict2.5-cookbook
+export SUTUREBOT_LEROBOT_PATH=/ephemeral/hf/lerobot/suturebot_lerobot   # LeRobot dataset from §2.4
+export COSMOS_CODE_PATH=/ephemeral/cosmos-predict2.5-cookbook   # path to cosmos-predict2.5-cookbook repo
+export COSMOS_CONTAINER_IMAGE=cosmos-predict2.5:local
+
+# Echo variables to check them
+echo "SUTUREBOT_LEROBOT_PATH=$SUTUREBOT_LEROBOT_PATH"
+echo "COSMOS_CODE_PATH=$COSMOS_CODE_PATH"
+echo "COSMOS_CONTAINER_IMAGE=$COSMOS_CONTAINER_IMAGE"
+
+# Optional: NGPUS=8  IMAGINAIRE_OUTPUT_ROOT=/path/to/output
 ./scripts/run_finetuning_standalone.sh
 ```
 
-If the training config expects the dataset at `/SutureBot`, create a symlink: `sudo ln -snf "$SUTUREBOT_LEROBOT_PATH" /SutureBot`. Copy `scripts/run_finetuning_standalone.sh` from this recipe into your clone if needed.
+**Without Docker (host env):** set the code path and ensure the repo’s venv is set up (§1.2). Do not set `COSMOS_CONTAINER_IMAGE`.
+
+```bash
+export SUTUREBOT_LEROBOT_PATH=/path/to/suturebot_lerobot
+export COSMOS_CODE_PATH=/ephemeral/cosmos-predict2.5-cookbook
+# Optional: NGPUS=8
+./scripts/run_finetuning_standalone.sh
+```
+
+**Option A (manual): Run Docker interactively, then run training inside**
+
+If you prefer to start the container yourself and run the training command by hand (e.g. to avoid GPU detection issues or to debug):
+
+1. **On the host:** from the directory that contains your **cosmos-predict2.5-cookbook** clone (or from the clone itself), set variables and start the container. Mount the cookbook as `/workspace`, the SutureBot LeRobot dataset as `/SutureBot`, and pass your HF token. Use the image tag you built in §1.2.1 (e.g. `cosmos-predict2.5:local`).
+
+   ```bash
+   export CODE_PATH=/ephemeral/cosmos-predict2.5-cookbook   # e.g. /ephemeral/cosmos-predict2.5-cookbook
+   export SUTUREBOT_LEROBOT_PATH=/ephemeral/hf/lerobot/suturebot_lerobot_mini   # LeRobot dataset from §2.4
+   export IMAGINAIRE_OUTPUT_ROOT=/ephemeral/output   # optional; default /tmp/imaginaire4-output
+   export image_tag=cosmos-predict2.5:local
+
+   docker run -it --runtime=nvidia --ipc=host --rm \
+     -v "$CODE_PATH:/workspace" \
+     -v "$SUTUREBOT_LEROBOT_PATH:/SutureBot:ro" \
+     -v "$CODE_PATH/.venv:/workspace/.venv" \
+     -v /root/.cache:/root/.cache \
+     -e HF_TOKEN="$HF_TOKEN" \
+     -e IMAGINAIRE_OUTPUT_ROOT="${IMAGINAIRE_OUTPUT_ROOT:-/tmp/imaginaire4-output}" \
+     -w /workspace \
+     $image_tag
+   ```
+
+   If your setup uses `--gpus all` instead of `--runtime=nvidia`, replace that flag. You will get a shell inside the container with `/workspace` as the current directory.
+
+2. **Inside the container:** run the training with `torchrun`. The config expects the dataset at `/SutureBot`.
+
+   **If you see "local_rank 1" failed or "CUDA device busy or unavailable":** the container often only exposes one GPU or multi-GPU device binding fails in Docker. Use a single process first:
+
+   ```bash
+   torchrun --nnodes=1 --nproc_per_node=1 --master_port=25001 \
+     -m scripts.train \
+     --config=cosmos_predict2/_src/predict2/action/configs/action_conditioned/config.py \
+     -- \
+     experiment="cosmos_predict2p5_2B_action_conditioned_suturebot_13frame_4nodes_release_oss" \
+     checkpoint.save_iter=200 \
+     dataloader_train.dataset.dataset_path=/SutureBot \
+     ~dataloader_train.dataloaders
+   ```
+
+   For multiple GPUs (only if `nvidia-smi` inside the container shows more than one GPU), use e.g. `--nproc_per_node=8` instead of `--nproc_per_node=1`. Adjust `--master_port` if needed.
+
+**Check CUDA/PyTorch compatibility (inside the container):** Driver and container should match. Your host `nvidia-smi` shows "CUDA Version: 12.8"; the default image is built with `cu128` (CUDA 12.8), which is correct for H100 (Hopper). To confirm what PyTorch sees inside the container, run:
+
+   ```bash
+   python -u -c "
+import sys
+print('Importing torch...', flush=True)
+import torch
+print('PyTorch', torch.__version__, 'CUDA compiled', torch.version.cuda, flush=True)
+print('Checking CUDA...', flush=True)
+av = torch.cuda.is_available()
+print('CUDA available', av, 'device_count', torch.cuda.device_count() if av else 0, flush=True)
+if av:
+    print('cuDNN', torch.backends.cudnn.version(), flush=True)
+"
+   ```
+
+   If you built the image with the **Blackwell/nightly** Dockerfile (`docker/nightly.Dockerfile`, cu130), the container uses CUDA 13.0 while the driver reports 12.8—that can cause "busy or unavailable". Rebuild with the default `Dockerfile` (cu128) on a 12.8 driver host.
+
+   **If the check hangs at "Checking CUDA...":** first CUDA use is hanging (often with multiple GPUs in Docker). Limit to one GPU and re-run the check, then start training with only that device visible:
+
+   ```bash
+   CUDA_VISIBLE_DEVICES=0 python -u -c "
+   print('Checking CUDA (device 0 only)...', flush=True)
+   import torch
+   av = torch.cuda.is_available()
+   print('CUDA available', av, 'count', torch.cuda.device_count(), flush=True)
+   "
+   ```
+
+   If that completes, run training with the same limit so only one process and one GPU are used: `CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 ...`
+
+**Troubleshooting "CUDA device busy or unavailable" (including with `--nproc_per_node=1`):** This usually means the GPU is in use by another process or the container does not have proper access. On the **host** (outside Docker): (1) Run `nvidia-smi` and stop any other process using the GPU. (2) Ensure no other Docker container is using the same GPU (`docker ps` then stop others if needed). (3) When starting the container, try pinning one GPU: `docker run ... --gpus '"device=0"' ...` so only GPU 0 is passed through. (4) Confirm the host driver and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) are installed and Docker is restarted after toolkit install. (5) For a more precise error location, run training with `CUDA_LAUNCH_BLOCKING=1` (e.g. `CUDA_LAUNCH_BLOCKING=1 torchrun ...`).
 
 ### Option B: Slurm (multi-node)
 

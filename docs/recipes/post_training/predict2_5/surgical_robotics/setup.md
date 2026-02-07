@@ -15,7 +15,7 @@ Run this setup **after** you clone the repository in [Post-training §1.1](post_
 Install system dependencies:
 
 ```shell
-sudo apt install curl ffmpeg tree wget
+sudo apt install curl ffmpeg parallel tree wget
 ```
 
 [uv](https://docs.astral.sh/uv/getting-started/installation/)
@@ -36,6 +36,12 @@ Or, install the package into the active environment (e.g. conda):
 
 ```shell
 uv sync --extra=cu128 --active --inexact
+```
+
+For the SutureBot→LeRobot conversion (Post-training §2.4), install lerobot 0.3.3 in the same environment:
+
+```shell
+pip install lerobot==0.3.3
 ```
 
 CUDA variants:
